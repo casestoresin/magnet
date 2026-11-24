@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { UnitInput, Slider, ColorInput, Select, Toggle, Section } from '@/components/ui/Inputs';
 import { TextArt } from './Layers';
 import { cldTransform } from '@/lib/image-url';
-import { EMOJI_STICKERS, TEXT_DEFAULTS, TEXT_FONTS, TEXT_PRESETS, emojiLayer, imageLayer, newTextLayer } from '@/lib/text';
+import { EMOJI_STICKERS, TEXT_BACKGROUNDS, TEXT_DEFAULTS, TEXT_FONTS, TEXT_PRESETS, emojiLayer, imageLayer, newTextLayer } from '@/lib/text';
 
 const EFFECTS = [
   { value: 'none', label: 'None' },
@@ -18,12 +18,61 @@ const FILLS = [
   { value: 'gradient', label: 'Gradient (2 colours)' },
   { value: 'none', label: 'Outline only' },
 ];
-const BGS = [
-  { value: 'none', label: 'None' },
-  { value: 'pill', label: 'Pill' },
-  { value: 'box', label: 'Box' },
-  { value: 'ribbon', label: 'Ribbon' },
-];
+// Background picker: clickable mini previews of every background type
+function BackgroundControls({ active, setL }) {
+  const bg = active.bg || 'none';
+  const meta = TEXT_BACKGROUNDS.find((b) => b.value === bg);
+  const pick = (b) =>
+    setL(
+      b.value === 'none'
+        ? { bg: 'none' }
+        : { bg: b.value, bgColor: b.c1, bgColor2: b.c2, bgOpacity: b.opacity ?? 1, bgScale: active.bgScale || 1 }
+    );
+  return (
+    <>
+      <span className="field-label">Background behind text</span>
+      <div className="bg-grid">
+        {TEXT_BACKGROUNDS.map((b) => (
+          <button key={b.value} className={bg === b.value ? 'on' : ''} onClick={() => pick(b)} title={b.label}>
+            <svg viewBox="-16 -7 32 14" width="100%" height="34">
+              {b.value !== 'none' && (
+                <TextArt
+                  layer={{ ...TEXT_DEFAULTS, text: 'Goa', font: 'Arial, sans-serif', weight: 700, size: 12, effect: 'none', color: b.value === 'clouds' || b.value === 'fog' || b.value === 'pill' ? '#1d3557' : '#ffffff', bg: b.value, bgColor: b.c1, bgColor2: b.c2, bgOpacity: 1 }}
+                  id={`bgpv-${b.value}`}
+                />
+              )}
+              {b.value === 'none' && (
+                <text x="0" y="0" textAnchor="middle" dominantBaseline="central" fontSize="5" fill="#6b7185">
+                  None
+                </text>
+              )}
+            </svg>
+            <small>{b.label.replace(/^[^A-Za-z]+\s/, '')}</small>
+          </button>
+        ))}
+      </div>
+      {bg !== 'none' && (
+        <>
+          <div className="grid-2">
+            <ColorInput label={meta?.scene ? 'Colour 1' : 'Colour'} value={active.bgColor} onChange={(v) => setL({ bgColor: v })} />
+            {meta?.scene && bg !== 'brush' && <ColorInput label="Colour 2" value={active.bgColor2 || active.bgColor} onChange={(v) => setL({ bgColor2: v })} />}
+          </div>
+          <Slider label="Background size" min={0.5} max={2.5} step={0.05} value={active.bgScale || 1} onChange={(v) => setL({ bgScale: v })} format={(v) => `${Math.round(v * 100)}%`} />
+          <Slider
+            label={bg === 'fog' ? 'Fog density' : 'Background opacity'}
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={active.bgOpacity ?? 1}
+            onChange={(v) => setL({ bgOpacity: v })}
+            format={(v) => `${Math.round(v * 100)}%`}
+          />
+          {!meta?.scene && active.curve ? <p className="hint">Pill / box / ribbon show on straight text only — scenes work with curved text too.</p> : null}
+        </>
+      )}
+    </>
+  );
+}
 
 function PresetTile({ preset, text, onClick }) {
   const layer = { ...TEXT_DEFAULTS, ...preset.style, text: preset.sample && !text ? preset.sample : text || 'Goa', curve: preset.style.curve ? 70 : 0 };
@@ -183,9 +232,7 @@ export default function TextPanel({ slot, index, frame, unit, actions, activeLay
           <Slider label="Rotate" min={-180} max={180} value={active.rotate || 0} onChange={(v) => setL({ rotate: v })} format={(v) => `${v}°`} />
           <Slider label="Opacity" min={0.1} max={1} step={0.05} value={active.opacity ?? 1} onChange={(v) => setL({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} />
 
-          <Select label="Background" value={active.bg || 'none'} onChange={(v) => setL({ bg: v })} options={BGS} />
-          {active.bg && active.bg !== 'none' && <ColorInput label="Background colour" value={active.bgColor} onChange={(v) => setL({ bgColor: v })} />}
-          {active.bg !== 'none' && active.curve ? <p className="hint">Backgrounds show on straight text only.</p> : null}
+          <BackgroundControls active={active} setL={setL} />
 
           <LayerPosition active={active} setL={setL} />
           <LayerActions index={index} active={active} actions={actions} />
