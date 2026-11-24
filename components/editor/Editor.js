@@ -842,6 +842,16 @@ export default function Editor({ id }) {
               <span className="toggle-track" />
               <span>Skip sheets with no photos</span>
             </label>
+            <label className="toggle">
+              <input type="checkbox" checked={!!project.marks.outline} onChange={(e) => patch('marks', { outline: e.target.checked })} />
+              <span className="toggle-track" />
+              <span>Print border line around each photo (cut outline)</span>
+            </label>
+            <label className="toggle">
+              <input type="checkbox" checked={!!project.marks.cutMarks} onChange={(e) => patch('marks', { cutMarks: e.target.checked })} />
+              <span className="toggle-track" />
+              <span>Print crop marks (small black cutting lines)</span>
+            </label>
             <div className="print-tips">
               <b>For exact sizes, in the print dialog choose:</b>
               <ul>

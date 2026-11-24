@@ -257,6 +257,7 @@ body.panning, body.panning .cell { cursor: grabbing !important; }
 @media print {
   html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
   .no-print, .screen-only { display: none !important; }
+  .cut-guide, .safe-guide { display: none !important; stroke: transparent !important; }
   .editor, .editor-body { height: auto !important; overflow: visible !important; display: block !important; }
   .canvas-wrap { display: block !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; background: #fff !important; }
   .sheet-block { display: block !important; margin: 0 !important; break-after: page; page-break-after: always; }
