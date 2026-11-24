@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { UnitInput, NumberInput, Slider, ColorInput, Select, Toggle, Section } from '@/components/ui/Inputs';
 import { imageArea, placeImage, qualityLabel } from '@/lib/layout';
 import { thumbUrl } from '@/lib/image-url';
@@ -13,7 +14,40 @@ const STATUSES = [
   { value: 'delivered', label: 'Delivered' },
 ];
 
+function CustomSize({ first, place, area, unit, set, lock, setLock }) {
+  const w = first.imgW || place.visW;
+  const h = first.imgH || place.visH;
+  const ratio = place.aspect; // photo's real width / height (after rotation)
+
+  return (
+    <>
+      <div className="size-row">
+        <UnitInput label="Photo width" unit={unit} min={1} valueMM={w} onChange={(v) => set(lock ? { imgW: v, imgH: v / ratio } : { imgW: v })} />
+        <button className={`lock-btn ${lock ? 'on' : ''}`} onClick={() => setLock(!lock)} title={lock ? 'Ratio locked (no stretching)' : 'Ratio unlocked (free stretch)'}>
+          {lock ? '🔒' : '🔓'}
+        </button>
+        <UnitInput label="Photo height" unit={unit} min={1} valueMM={h} onChange={(v) => set(lock ? { imgH: v, imgW: v * ratio } : { imgH: v })} />
+      </div>
+      <div className="btn-row">
+        <button className="btn ghost" onClick={() => set({ imgW: area.w, imgH: area.w / ratio, ox: 0, oy: 0 })} title="Photo width = frame width, height keeps the real ratio">
+          ↔ Match width
+        </button>
+        <button className="btn ghost" onClick={() => set({ imgH: area.h, imgW: area.h * ratio, ox: 0, oy: 0 })} title="Photo height = frame height, width keeps the real ratio">
+          ↕ Match height
+        </button>
+        <button className="btn ghost" onClick={() => set({ imgW: area.w, imgH: area.h, ox: 0, oy: 0 })} title="Exactly the frame size (may stretch)">
+          ⤢ Match frame
+        </button>
+        <button className="btn ghost" onClick={() => set({ imgH: w / ratio })} title="Fix stretching — restore the real photo shape">
+          ↺ Real ratio
+        </button>
+      </div>
+    </>
+  );
+}
+
 export default function PropertiesPanel({ project, selection, layout, totalPages, filledCount, actions }) {
+  const [lockRatio, setLockRatio] = useState(false);
   const unit = project.unit;
   const filled = selection.map((i) => project.slots[i]).filter((s) => s && s.url);
   const first = filled[0];
@@ -95,7 +129,8 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
   }
 
   const set = (obj) => actions.patchSlots(selection, obj);
-  const place = placeImage(first, imageArea(project.frame));
+  const area = imageArea(project.frame);
+  const place = placeImage(first, area);
   const q = qualityLabel(place?.dpi);
 
   return (
@@ -114,15 +149,47 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
       </Section>
 
       <Section title="Fit & position">
-        <div className="seg">
-          <button className={first.fit !== 'contain' ? 'active' : ''} onClick={() => set({ fit: 'cover' })}>
-            Fill (crop)
+        <div className="seg seg-4">
+          <button className={!['contain', 'stretch', 'custom'].includes(first.fit) ? 'active' : ''} onClick={() => set({ fit: 'cover', zoom: 1 })} title="Fills the frame, extra parts get cropped">
+            Fill
           </button>
-          <button className={first.fit === 'contain' ? 'active' : ''} onClick={() => set({ fit: 'contain' })}>
-            Fit whole photo
+          <button className={first.fit === 'contain' ? 'active' : ''} onClick={() => set({ fit: 'contain', zoom: 1 })} title="Whole photo visible, may leave empty space">
+            Fit
+          </button>
+          <button className={first.fit === 'stretch' ? 'active' : ''} onClick={() => set({ fit: 'stretch', zoom: 1, ox: 0, oy: 0 })} title="Stretch to exactly the frame — nothing cut, no empty space">
+            Stretch
+          </button>
+          <button
+            className={first.fit === 'custom' ? 'active' : ''}
+            onClick={() => first.fit !== 'custom' && set({ fit: 'custom', imgW: place.visW, imgH: place.visH, zoom: 1 })}
+            title="Set photo width & height yourself"
+          >
+            Custom
           </button>
         </div>
-        <Slider label="Zoom" min={0.2} max={5} step={0.01} value={first.zoom ?? 1} onChange={(v) => set({ zoom: v })} format={(v) => `${Math.round(v * 100)}%`} />
+        <p className="hint fit-hint">
+          {first.fit === 'contain'
+            ? 'Whole photo shows; empty area uses the background colour.'
+            : first.fit === 'stretch'
+            ? 'Photo is stretched to exactly fill the frame — nothing is cut.'
+            : first.fit === 'custom'
+            ? 'Type the photo width & height. Unlock the ratio to stretch it in one direction only.'
+            : 'Photo fills the frame; extra parts are cropped. Drag on the photo to choose what shows.'}
+        </p>
+
+        {first.fit === 'custom' ? (
+          <CustomSize first={first} place={place} area={area} unit={unit} set={set} lock={lockRatio} setLock={setLockRatio} />
+        ) : (
+          first.fit !== 'stretch' && (
+            <Slider label="Zoom" min={0.2} max={5} step={0.01} value={first.zoom ?? 1} onChange={(v) => set({ zoom: v })} format={(v) => `${Math.round(v * 100)}%`} />
+          )
+        )}
+        {place && Math.abs(place.distortion - 1) > 0.02 && (
+          <div className="alert warn sm">
+            Photo is {place.distortion > 1 ? 'stretched wider' : 'stretched taller'} by {Math.round(Math.abs(place.distortion - 1) * 100)}% — faces may look
+            {place.distortion > 1 ? ' wider' : ' thinner'}.
+          </div>
+        )}
         <div className="grid-2">
           <UnitInput label="Move X" unit={unit} min={null} valueMM={first.ox || 0} onChange={(v) => set({ ox: v })} />
           <UnitInput label="Move Y" unit={unit} min={null} valueMM={first.oy || 0} onChange={(v) => set({ oy: v })} />
