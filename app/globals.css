@@ -224,6 +224,13 @@ body.panning, body.panning .cell { cursor: grabbing !important; }
 .cell-empty span { font-size: 22px; line-height: 1; }
 .cell-empty small { font-size: 10px; }
 .cell-warn { position: absolute; top: 3px; left: 3px; background: var(--danger); color: #fff; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 4px; pointer-events: none; }
+.cell.is-problem { outline: 2px solid var(--danger); outline-offset: 0; }
+.cell.is-problem.is-selected { outline: 2px solid var(--danger); box-shadow: 0 0 0 3px var(--accent); }
+.sheet-block.is-active .sheet { box-shadow: 0 0 0 2px var(--accent), 0 2px 12px rgba(20,24,40,.15); }
+.active-tag { color: var(--accent); font-style: normal; font-weight: 600; }
+.sheet-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20%; color: #a0a6b8; font-size: 14px; pointer-events: none; }
+.tool-seg { margin: 0; }
+.tool-seg button { padding: 5px 10px; white-space: nowrap; }
 .add-page { border: 2px dashed #b9bfd0; background: transparent; border-radius: 10px; padding: 14px 40px; color: var(--muted); font-weight: 700; }
 .add-page:hover { border-color: var(--accent); color: var(--accent); }
 

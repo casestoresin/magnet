@@ -5,7 +5,7 @@ import Project from '@/models/Project';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const EDITABLE = ['name', 'customer', 'phone', 'notes', 'status', 'unit', 'page', 'frame', 'grid', 'marks', 'pageCount', 'slots'];
+const EDITABLE = ['name', 'customer', 'phone', 'notes', 'status', 'unit', 'page', 'frame', 'grid', 'marks', 'layoutMode', 'items', 'pageCount', 'slots'];
 
 export async function GET(req, { params }) {
   try {

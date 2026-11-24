@@ -11,11 +11,11 @@ const TABS = [
   { id: 'photos', icon: '🖼', label: 'Photos' },
   { id: 'sheet', icon: '📄', label: 'Sheet' },
   { id: 'frame', icon: '⬜', label: 'Frame' },
-  { id: 'grid', icon: '▦', label: 'Grid' },
+  { id: 'grid', icon: '▦', label: 'Layout' },
   { id: 'marks', icon: '✂', label: 'Marks' },
 ];
 
-export default function LeftPanel({ project, patch, update, layout, lib, usage, onPhotoClick, onAutoFill, hasSelection }) {
+export default function LeftPanel({ project, patch, update, layout, lib, usage, onPhotoClick, onAutoFill, hasSelection, free, activePage }) {
   const [tab, setTab] = useState('photos');
   const unit = project.unit;
 
@@ -34,8 +34,26 @@ export default function LeftPanel({ project, patch, update, layout, lib, usage, 
           <PhotosTab lib={lib} usage={usage} onPhotoClick={onPhotoClick} onAutoFill={onAutoFill} hasSelection={hasSelection} />
         )}
         {tab === 'sheet' && <SheetTab project={project} patch={patch} unit={unit} />}
-        {tab === 'frame' && <FrameTab project={project} patch={patch} unit={unit} />}
-        {tab === 'grid' && <GridTab project={project} patch={patch} update={update} unit={unit} layout={layout} />}
+        {tab === 'frame' && <FrameTab project={project} patch={patch} unit={unit} free={free} />}
+        {tab === 'grid' && (
+          <>
+            <Section title="Layout type">
+              <div className="seg">
+                <button className={project.layoutMode !== 'free' ? 'active' : ''} onClick={() => free.setMode('grid')}>
+                  ▦ Grid (one size)
+                </button>
+                <button className={project.layoutMode === 'free' ? 'active' : ''} onClick={() => free.setMode('free')}>
+                  ✥ Free (mixed sizes)
+                </button>
+              </div>
+            </Section>
+            {project.layoutMode === 'free' ? (
+              <FreeTab project={project} patch={patch} unit={unit} free={free} activePage={activePage} />
+            ) : (
+              <GridTab project={project} patch={patch} update={update} unit={unit} layout={layout} />
+            )}
+          </>
+        )}
         {tab === 'marks' && <MarksTab project={project} patch={patch} unit={unit} />}
       </div>
     </aside>
@@ -152,6 +170,7 @@ function SheetTab({ project, patch, unit }) {
 
 function FrameTab({ project, patch, unit }) {
   const { frame } = project;
+  const isFree = project.layoutMode === 'free';
 
   const setPreset = (id) => {
     const p = FRAME_PRESETS.find((x) => x.id === id);
@@ -170,6 +189,11 @@ function FrameTab({ project, patch, unit }) {
 
   return (
     <>
+      {isFree && (
+        <div className="alert warn sm">
+          Free layout: these settings are for <b>new</b> frames. To change a frame already on the sheet, click it and use the right panel.
+        </div>
+      )}
       <Section title="Magnet size">
         <Select
           label="Preset"
@@ -287,6 +311,107 @@ function GridTab({ project, patch, update, unit, layout }) {
         <p className="hint">
           Unused space: {displayValue(Math.max(0, layout.freeW), unit)} × {displayValue(Math.max(0, layout.freeH), unit)} {unit}
         </p>
+      </Section>
+    </>
+  );
+}
+
+function FreeTab({ project, patch, unit, free, activePage }) {
+  const { frame, grid } = project;
+  const [linkGap, setLinkGap] = useState(grid.gapX === grid.gapY);
+  const [rotateFill, setRotateFill] = useState(true);
+  const [rotateArrange, setRotateArrange] = useState(false);
+  const items = project.items || [];
+  const isSquare = Math.abs(frame.width - frame.height) < 0.01;
+
+  // count frames by size on all sheets
+  const counts = {};
+  items.forEach((it) => {
+    const a = Math.min(it.frame.width, it.frame.height);
+    const b = Math.max(it.frame.width, it.frame.height);
+    const key = `${formatSize(a, b, unit)}${it.frame.shape !== 'rect' ? ` ${it.frame.shape}` : ''}`;
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  const setPreset = (id) => {
+    const p = FRAME_PRESETS.find((x) => x.id === id);
+    if (!p) return patch('frame', { preset: 'custom' });
+    patch('frame', {
+      preset: id,
+      width: p.width,
+      height: p.height,
+      shape: p.shape,
+      radius: p.radius ?? frame.radius ?? 3,
+      bleed: p.bleed ?? 1.5,
+      border: p.border ?? 0,
+      borderBottom: p.borderBottom ?? 0,
+    });
+  };
+
+  return (
+    <>
+      <Section title="1 · Choose frame size">
+        <Select
+          label="Size"
+          value={frame.preset || 'custom'}
+          onChange={setPreset}
+          options={[{ value: 'custom', label: 'Custom size' }, ...FRAME_PRESETS.map((p) => ({ value: p.id, label: p.name }))]}
+        />
+        <div className="grid-2">
+          <UnitInput label="Width" unit={unit} valueMM={frame.width} min={5} onChange={(v) => patch('frame', { width: v, preset: 'custom' })} />
+          <UnitInput label="Height" unit={unit} valueMM={frame.height} min={5} onChange={(v) => patch('frame', { height: v, preset: 'custom' })} />
+        </div>
+        <p className="hint">Shape, bleed and border are set in the Frame tab.</p>
+      </Section>
+
+      <Section title={`2 · Add to sheet ${activePage + 1}`}>
+        <div className="btn-row">
+          <button className="btn primary" onClick={() => free.addFrame(false)}>
+            + Add {frame.width >= frame.height ? '▭' : '▯'}
+          </button>
+          <button className="btn ghost" disabled={isSquare} onClick={() => free.addFrame(true)} title="Same size, turned 90°">
+            + Add turned {frame.width >= frame.height ? '▯' : '▭'}
+          </button>
+        </div>
+        <button className="btn ghost block" onClick={() => free.fillSheet(rotateFill)}>
+          ⊞ Fill empty space on sheet {activePage + 1}
+        </button>
+        {!isSquare && <Toggle label="Also use turned frames to fit more" checked={rotateFill} onChange={setRotateFill} />}
+        <p className="hint">Click a sheet to choose where new frames go. Drag frames to move them — they snap to edges and spacing. Hold Shift while dragging to turn snapping off.</p>
+      </Section>
+
+      <Section title="Spacing between frames" right={<Toggle label="Link" checked={linkGap} onChange={setLinkGap} />}>
+        {linkGap ? (
+          <UnitInput label="Gap" unit={unit} valueMM={grid.gapX} onChange={(v) => patch('grid', { gapX: v, gapY: v })} />
+        ) : (
+          <div className="grid-2">
+            <UnitInput label="Horizontal gap" unit={unit} valueMM={grid.gapX} onChange={(v) => patch('grid', { gapX: v })} />
+            <UnitInput label="Vertical gap" unit={unit} valueMM={grid.gapY} onChange={(v) => patch('grid', { gapY: v })} />
+          </div>
+        )}
+      </Section>
+
+      <Section title="Tidy up">
+        <button className="btn ghost block" disabled={!items.length} onClick={() => free.arrange(rotateArrange)}>
+          ⟳ Auto-arrange all frames
+        </button>
+        <Toggle label="Allow turning frames while arranging" checked={rotateArrange} onChange={setRotateArrange} />
+        <p className="hint">Packs every frame (biggest first) onto the fewest sheets. Photos stay inside their frames.</p>
+      </Section>
+
+      <Section title={`Frames (${items.length})`}>
+        {items.length ? (
+          <ul className="summary">
+            {Object.entries(counts).map(([k, n]) => (
+              <li key={k}>
+                <span>{k}</span>
+                <b>× {n}</b>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="hint">No frames yet.</p>
+        )}
       </Section>
     </>
   );

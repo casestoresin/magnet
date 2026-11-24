@@ -8,6 +8,7 @@ import PropertiesPanel from './PropertiesPanel';
 import { usePhotos } from '@/components/PhotoLibrary';
 import { api, logout } from '@/lib/api';
 import { computeLayout, pagesNeeded } from '@/lib/layout';
+import { autoArrange, fillPageItems, frameTemplate, itemsFromGrid, placeNewItem, problemItems, rotatedFrame, snapPosition } from '@/lib/free';
 import { DEFAULT_SLOT, defaultProject } from '@/lib/presets';
 import { UNITS, UNIT_LABELS, MM_PER_PX, PX_PER_MM } from '@/lib/units';
 
@@ -36,7 +37,34 @@ function normalize(p) {
     grid: { ...base.grid, ...(p.grid || {}) },
     marks: { ...base.marks, ...(p.marks || {}) },
     slots: p.slots || [],
+    items: p.items || [],
+    layoutMode: p.layoutMode || 'grid',
   };
+}
+
+const range = (a, b) => Array.from({ length: Math.max(0, b - a) }, (_, i) => a + i);
+
+// Put photos into empty frames (or overwrite), starting at `start`.
+// In free layout, new frames of the current Frame-tab size are added when frames run out.
+function fillPhotos(p, photos, start, overwrite) {
+  const free = p.layoutMode === 'free';
+  const slots = [...p.slots];
+  const items = [...(p.items || [])];
+  const placed = [];
+  let i = start;
+  for (const photo of photos) {
+    if (!overwrite) while ((!free || i < items.length) && slots[i] && slots[i].url) i++;
+    if (free && i >= items.length) {
+      const tmp = { ...p, items };
+      items.push(placeNewItem(tmp, frameTemplate(p.frame), 0, false, pagesNeeded(tmp, 0)));
+      i = items.length - 1;
+    }
+    slots[i] = slotFromPhoto(photo, slots[i]);
+    placed.push(i);
+    i++;
+  }
+  const next = { ...p, slots, items };
+  return { next: { ...next, pageCount: pagesNeeded(next, computeLayout(next).perPage) }, placed };
 }
 
 export default function Editor({ id }) {
@@ -49,6 +77,8 @@ export default function Editor({ id }) {
   const [printOpts, setPrintOpts] = useState({ skipEmpty: true, from: 1, to: 999 });
   const [calibration, setCalibration] = useState(false);
   const [toast, setToast] = useState('');
+  const [dragTool, setDragTool] = useState('move'); // free layout: 'move' frames or 'pan' photo
+  const [activePage, setActivePage] = useState(0);
 
   const lib = usePhotos();
   const projectRef = useRef(null);
@@ -168,6 +198,10 @@ export default function Editor({ id }) {
   const layout = useMemo(() => (project ? computeLayout(project) : null), [project]);
   const totalPages = project && layout ? pagesNeeded(project, layout.perPage) : 1;
   const filledCount = project ? project.slots.filter((s) => s && s.url).length : 0;
+  const isFree = project?.layoutMode === 'free';
+  const problems = useMemo(() => (project?.layoutMode === 'free' ? problemItems(project) : null), [project]);
+  const dragToolRef = useRef(dragTool);
+  dragToolRef.current = dragTool;
   const usage = useMemo(() => {
     const u = {};
     project?.slots.forEach((s) => {
@@ -240,41 +274,120 @@ export default function Editor({ id }) {
     [setSlots]
   );
 
-  const firstEmpty = (slots, from = 0) => {
-    let i = from;
-    while (slots[i] && slots[i].url) i++;
-    return i;
-  };
-
   const onPhotoClick = useCallback(
     (photo) => {
       const sel = selection;
       if (sel.length) {
         setSlots((slots) => sel.forEach((i) => (slots[i] = slotFromPhoto(photo, slots[i]))));
       } else {
-        const i = firstEmpty(projectRef.current.slots);
-        placePhoto(i, photo);
-        setSelection([i]);
+        let placed = [];
+        update((p) => {
+          const r = fillPhotos(p, [photo], 0, false);
+          placed = r.placed;
+          return r.next;
+        });
+        setSelection(placed);
       }
     },
-    [selection, setSlots, placePhoto]
+    [selection, setSlots, update]
   );
 
   const onAutoFill = useCallback(
     (photos, { copies = 1, overwrite = false, fromSelected = false }) => {
       const queue = photos.flatMap((p) => Array.from({ length: copies }, () => p));
-      let start = fromSelected && selection.length ? Math.min(...selection) : 0;
-      setSlots((slots) => {
-        let i = start;
-        for (const photo of queue) {
-          if (!overwrite) i = firstEmpty(slots, i);
-          slots[i] = slotFromPhoto(photo, slots[i]);
-          i++;
-        }
-      });
+      const start = fromSelected && selection.length ? Math.min(...selection) : 0;
+      update((p) => fillPhotos(p, queue, start, overwrite).next);
       setToast(`Placed ${queue.length} magnet(s)`);
     },
-    [selection, setSlots]
+    [selection, update]
+  );
+
+  // ---------- free layout ----------
+  const indicesOnPage = useCallback(
+    (pi) => {
+      const p = projectRef.current;
+      const perPg = computeLayout(p).perPage;
+      if (p.layoutMode === 'free') return (p.items || []).map((it, i) => (it.page === pi ? i : -1)).filter((i) => i >= 0);
+      return range(pi * perPg, (pi + 1) * perPg);
+    },
+    []
+  );
+
+  const removeItems = useCallback(
+    (indices) => {
+      const drop = new Set(indices);
+      update((p) => {
+        const items = [];
+        const slots = [];
+        (p.items || []).forEach((it, i) => {
+          if (!drop.has(i)) {
+            items.push(it);
+            slots.push(p.slots[i] || null);
+          }
+        });
+        return { ...p, items, slots };
+      });
+      setSelection([]);
+    },
+    [update]
+  );
+
+  const free = useMemo(
+    () => ({
+      setMode: (mode) => {
+        const p = projectRef.current;
+        if (mode === p.layoutMode) return;
+        if (mode === 'free') {
+          const lay = computeLayout(p);
+          const pages = pagesNeeded(p, lay.perPage);
+          update({ layoutMode: 'free', items: itemsFromGrid(p, lay, pages), pageCount: pages });
+          setToast('Free layout on — your current grid was kept. Now add frames of any size.');
+        } else {
+          const mixed = new Set((p.items || []).map((it) => `${it.frame.width}x${it.frame.height}`)).size > 1;
+          if (mixed && !confirm('Grid mode uses ONE frame size for everything. Mixed sizes will be lost (photos are kept in order). Continue?')) return;
+          update({ layoutMode: 'grid', items: [] });
+        }
+        setSelection([]);
+      },
+      addFrame: (rotate = false) => {
+        let idx = -1;
+        update((p) => {
+          const f = rotate ? rotatedFrame(frameTemplate(p.frame)) : frameTemplate(p.frame);
+          const tot = pagesNeeded(p, 0);
+          const item = placeNewItem(p, f, Math.min(activePage, tot - 1), false, tot);
+          const items = [...(p.items || []), item];
+          idx = items.length - 1;
+          const next = { ...p, items };
+          return { ...next, pageCount: pagesNeeded(next, 0) };
+        });
+        setSelection([idx]);
+      },
+      fillSheet: (allowRotate) => {
+        let n = 0;
+        update((p) => {
+          const tot = pagesNeeded(p, 0);
+          const pg = Math.min(activePage, tot - 1);
+          const added = fillPageItems(p, frameTemplate(p.frame), pg, allowRotate);
+          n = added.length;
+          return n ? { ...p, items: [...(p.items || []), ...added] } : p;
+        });
+        setToast(n ? `Added ${n} frame(s) to sheet ${activePage + 1}` : 'No empty space left on this sheet for that size');
+      },
+      arrange: (allowRotate) => {
+        update((p) => {
+          if (!(p.items || []).length) return p;
+          const r = autoArrange(p, allowRotate);
+          return { ...p, items: r.items, slots: r.order.map((i) => p.slots[i] || null), pageCount: r.pageCount };
+        });
+        setSelection([]);
+        setToast('Frames re-arranged to use the fewest sheets');
+      },
+      clearFrames: (pi) => {
+        if (!confirm(`Remove all frames (and their photos) from sheet ${pi + 1}?`)) return;
+        removeItems(indicesOnPage(pi));
+      },
+    }),
+    [update, activePage, removeItems, indicesOnPage]
   );
 
   const perPage = layout?.perPage || 0;
@@ -288,22 +401,46 @@ export default function Editor({ id }) {
       fillEmptyWith: (index) =>
         setSlots((slots, p) => {
           const src = slots[index];
-          const total = pagesNeeded(p, perPage) * perPage;
+          const total = p.layoutMode === 'free' ? (p.items || []).length : pagesNeeded(p, perPage) * perPage;
           for (let i = 0; i < total; i++) if (!(slots[i] && slots[i].url)) slots[i] = { ...src };
         }),
       fillPageWith: (index) =>
-        setSlots((slots) => {
+        setSlots((slots, p) => {
           const src = slots[index];
-          const start = Math.floor(index / perPage) * perPage;
-          for (let i = start; i < start + perPage; i++) slots[i] = { ...src };
+          const pi = p.layoutMode === 'free' ? p.items[index].page : Math.floor(index / perPage);
+          indicesOnPage(pi).forEach((i) => (slots[i] = { ...src }));
         }),
+      // free layout: change the frame of selected items
+      patchFrames: (indices, obj) =>
+        update(
+          (p) => {
+            const items = [...(p.items || [])];
+            indices.forEach((i) => items[i] && (items[i] = { ...items[i], frame: { ...items[i].frame, ...obj } }));
+            return { ...p, items };
+          },
+          { mergeKey: `frames:${indices.join(',')}:${Object.keys(obj).join(',')}` }
+        ),
+      rotateFrames: (indices) =>
+        update((p) => {
+          const items = [...(p.items || [])];
+          const slots = [...p.slots];
+          indices.forEach((i) => {
+            if (!items[i]) return;
+            items[i] = { ...items[i], frame: rotatedFrame(items[i].frame) };
+            // keep custom photo size sensible after the frame turns
+            if (slots[i] && slots[i].fit === 'custom') slots[i] = { ...slots[i], fit: 'cover', imgW: 0, imgH: 0 };
+          });
+          return { ...p, items, slots };
+        }),
+      deleteFrames: (indices) => removeItems(indices),
+      arrange: (allowRotate) => free.arrange(allowRotate),
       applyStyleToAll: (index) =>
         setSlots((slots) => {
           const style = pick(slots[index], [...STYLE_KEYS, 'zoom']);
           for (let i = 0; i < slots.length; i++) if (slots[i] && slots[i].url) slots[i] = { ...slots[i], ...style };
         }),
     }),
-    [patchRoot, patchSlots, clearSlots, setSlots, perPage]
+    [patchRoot, patchSlots, clearSlots, setSlots, perPage, update, indicesOnPage, removeItems, free]
   );
 
   // ---------- pages ----------
@@ -312,14 +449,35 @@ export default function Editor({ id }) {
     if (totalPages <= 1) return clearPage(pi);
     if (!confirm(`Delete sheet ${pi + 1}?`)) return;
     update((p) => {
+      if (p.layoutMode === 'free') {
+        const items = [];
+        const slots = [];
+        (p.items || []).forEach((it, i) => {
+          if (it.page === pi) return;
+          items.push(it.page > pi ? { ...it, page: it.page - 1 } : it);
+          slots.push(p.slots[i] || null);
+        });
+        return { ...p, items, slots, pageCount: totalPages - 1 };
+      }
       const slots = [...p.slots];
       slots.splice(pi * perPage, perPage);
       return { ...p, slots, pageCount: totalPages - 1 };
     });
     setSelection([]);
+    setActivePage(0);
   };
   const duplicatePage = (pi) =>
     update((p) => {
+      if (p.layoutMode === 'free') {
+        const items = (p.items || []).map((it) => (it.page > pi ? { ...it, page: it.page + 1 } : it));
+        const slots = [...p.slots];
+        (p.items || []).forEach((it, i) => {
+          if (it.page !== pi) return;
+          items.push({ ...it, page: pi + 1, frame: { ...it.frame } });
+          slots[items.length - 1] = p.slots[i] ? { ...p.slots[i] } : null;
+        });
+        return { ...p, items, slots, pageCount: totalPages + 1 };
+      }
       const slots = [...p.slots];
       while (slots.length < (pi + 1) * perPage) slots.push(null);
       const copy = slots.slice(pi * perPage, (pi + 1) * perPage).map((s) => (s ? { ...s } : null));
@@ -328,9 +486,9 @@ export default function Editor({ id }) {
     });
   const clearPage = (pi) =>
     setSlots((slots) => {
-      for (let i = pi * perPage; i < (pi + 1) * perPage; i++) slots[i] = null;
+      indicesOnPage(pi).forEach((i) => (slots[i] = null));
     });
-  const selectPage = (pi) => setSelection(Array.from({ length: perPage }, (_, i) => pi * perPage + i));
+  const selectPage = (pi) => setSelection(indicesOnPage(pi));
 
   // ---------- pointer: select + drag to pan ----------
   const drag = useRef(null);
@@ -340,10 +498,19 @@ export default function Editor({ id }) {
       e.stopPropagation();
       const multi = e.shiftKey || e.metaKey || e.ctrlKey;
       setSelection((sel) => (multi ? (sel.includes(index) ? sel.filter((i) => i !== index) : [...sel, index]) : [index]));
-      const slot = projectRef.current.slots[index];
-      if (multi || !slot || !slot.url) return;
+      const cur = projectRef.current;
+      const freeMode = cur.layoutMode === 'free';
+      if (freeMode && cur.items[index]) setActivePage(cur.items[index].page);
+      else if (!freeMode) {
+        const pp = computeLayout(cur).perPage;
+        if (pp) setActivePage(Math.floor(index / pp));
+      }
+      const slot = cur.slots[index];
+      const moveFrame = freeMode && dragToolRef.current === 'move' && !e.altKey;
+      if (multi || (!moveFrame && (!slot || !slot.url))) return;
 
-      drag.current = { index, sx: e.clientX, sy: e.clientY, ox: slot.ox || 0, oy: slot.oy || 0, moved: false };
+      const it = freeMode ? cur.items[index] : null;
+      drag.current = { index, sx: e.clientX, sy: e.clientY, ox: slot?.ox || 0, oy: slot?.oy || 0, fx: it?.x, fy: it?.y, moved: false };
       const move = (ev) => {
         const d = drag.current;
         if (!d) return;
@@ -351,6 +518,22 @@ export default function Editor({ id }) {
         const pxY = ev.clientY - d.sy;
         if (!d.moved && Math.hypot(pxX, pxY) < 3) return;
         const k = MM_PER_PX / zoomRef.current;
+        if (moveFrame) {
+          const { x, y } = ev.shiftKey
+            ? { x: d.fx + pxX * k, y: d.fy + pxY * k } // Shift = no snapping
+            : snapPosition(projectRef.current, d.index, d.fx + pxX * k, d.fy + pxY * k);
+          update(
+            (p) => {
+              const items = [...p.items];
+              items[d.index] = { ...items[d.index], x, y };
+              return { ...p, items };
+            },
+            { record: !d.moved }
+          );
+          d.moved = true;
+          document.body.classList.add('panning');
+          return;
+        }
         const ox = d.ox + pxX * k;
         const oy = d.oy + pxY * k;
         update(
@@ -427,7 +610,8 @@ export default function Editor({ id }) {
         redo();
       } else if (mod && k === 'a') {
         e.preventDefault();
-        setSelection(Array.from({ length: totalPages * perPage }, (_, i) => i));
+        const p = projectRef.current;
+        setSelection(range(0, p.layoutMode === 'free' ? (p.items || []).length : totalPages * perPage));
       } else if (mod && k === 'c' && selection.length) {
         const s = projectRef.current.slots[selection[0]];
         if (s && s.url) {
@@ -440,7 +624,11 @@ export default function Editor({ id }) {
         setSlots((slots) => selection.forEach((i) => (slots[i] = { ...src })));
       } else if ((k === 'delete' || k === 'backspace') && selection.length) {
         e.preventDefault();
-        clearSlots(selection);
+        const p = projectRef.current;
+        const anyPhoto = selection.some((i) => p.slots[i] && p.slots[i].url);
+        // Free layout: Delete on empty frames removes the frames themselves
+        if (p.layoutMode === 'free' && !anyPhoto) removeItems(selection);
+        else clearSlots(selection);
       } else if (k === 'escape') {
         setSelection([]);
         setPrintOpen(false);
@@ -449,6 +637,17 @@ export default function Editor({ id }) {
         const step = e.shiftKey ? 5 : 0.5;
         const dx = k === 'arrowleft' ? -step : k === 'arrowright' ? step : 0;
         const dy = k === 'arrowup' ? -step : k === 'arrowdown' ? step : 0;
+        if (projectRef.current.layoutMode === 'free' && dragTool === 'move') {
+          update(
+            (p) => {
+              const items = [...p.items];
+              selection.forEach((i) => items[i] && (items[i] = { ...items[i], x: items[i].x + dx, y: items[i].y + dy }));
+              return { ...p, items };
+            },
+            { mergeKey: `move:${selection.join(',')}` }
+          );
+          return;
+        }
         setSlots(
           (slots) =>
             selection.forEach((i) => {
@@ -460,7 +659,7 @@ export default function Editor({ id }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selection, undo, redo, save, clearSlots, setSlots, totalPages, perPage]);
+  }, [selection, undo, redo, save, clearSlots, setSlots, totalPages, perPage, removeItems, update, dragTool]);
 
   // ---------- render ----------
   if (loadError)
@@ -475,10 +674,7 @@ export default function Editor({ id }) {
     );
   if (!project || !layout) return <div className="center-msg">Loading editor…</div>;
 
-  const pageHasPhotos = (pi) => {
-    for (let i = pi * perPage; i < (pi + 1) * perPage; i++) if (project.slots[i] && project.slots[i].url) return true;
-    return false;
-  };
+  const pageHasPhotos = (pi) => indicesOnPage(pi).some((i) => project.slots[i] && project.slots[i].url);
   const printable = (pi) => pi + 1 >= printOpts.from && pi + 1 <= printOpts.to && (!printOpts.skipEmpty || pageHasPhotos(pi));
   const printCount = Array.from({ length: totalPages }, (_, i) => i).filter(printable).length;
 
@@ -528,6 +724,18 @@ export default function Editor({ id }) {
             100%
           </button>
         </div>
+        {isFree && (
+          <div className="toolbar-group">
+            <div className="seg tool-seg">
+              <button className={dragTool === 'move' ? 'active' : ''} onClick={() => setDragTool('move')} title="Drag moves the frame (hold Alt to move the photo instead)">
+                ✥ Move frame
+              </button>
+              <button className={dragTool === 'pan' ? 'active' : ''} onClick={() => setDragTool('pan')} title="Drag moves the photo inside its frame">
+                🖐 Move photo
+              </button>
+            </div>
+          </div>
+        )}
         <div className="spacer" />
         <span className="muted sm">
           {filledCount} magnets · {totalPages} sheet{totalPages > 1 ? 's' : ''}
@@ -551,24 +759,43 @@ export default function Editor({ id }) {
           onPhotoClick={onPhotoClick}
           onAutoFill={onAutoFill}
           hasSelection={selection.length > 0}
+          free={free}
+          activePage={activePage}
         />
 
         <main className="canvas-wrap" ref={wrapRef} onPointerDown={(e) => e.target === e.currentTarget && setSelection([])}>
-          {layout.perPage === 0 && (
+          {!isFree && layout.perPage === 0 && (
             <div className="alert error no-print">The magnet size (with bleed) is bigger than the printable area. Make the magnet smaller or the margins smaller.</div>
           )}
-          {layout.overflow && <div className="alert warn no-print">The grid is bigger than the printable area — some magnets fall outside the margins.</div>}
+          {!isFree && layout.overflow && <div className="alert warn no-print">The grid is bigger than the printable area — some magnets fall outside the margins.</div>}
+          {isFree && problems?.size > 0 && (
+            <div className="alert warn no-print">
+              {problems.size} frame(s) overlap or go outside the margins (shown in red).{' '}
+              <button className="link" onClick={() => free.arrange(false)}>
+                Auto-arrange
+              </button>
+            </div>
+          )}
 
           {Array.from({ length: totalPages }, (_, pi) => (
-            <div key={pi} className={`sheet-block ${printable(pi) ? '' : 'skip-print'}`} onPointerDown={(e) => e.target === e.currentTarget && setSelection([])}>
+            <div
+              key={pi}
+              className={`sheet-block ${printable(pi) ? '' : 'skip-print'} ${isFree && activePage === pi ? 'is-active' : ''}`}
+              onPointerDownCapture={() => setActivePage(pi)}
+              onPointerDown={(e) => e.target === e.currentTarget && setSelection([])}
+            >
               <div className="sheet-head no-print" style={{ width: `${project.page.width * PX_PER_MM * zoom}px` }}>
                 <span>
                   Sheet {pi + 1} / {totalPages}
+                  {isFree && activePage === pi && <em className="active-tag"> · new frames go here</em>}
                 </span>
                 <div className="sheet-actions">
                   <button onClick={() => selectPage(pi)} title="Select all magnets on this sheet">Select all</button>
                   <button onClick={() => duplicatePage(pi)} title="Duplicate sheet">Duplicate</button>
                   <button onClick={() => clearPage(pi)} title="Remove all photos from this sheet">Clear</button>
+                  {isFree && (
+                    <button onClick={() => free.clearFrames(pi)} title="Remove all frames from this sheet">Remove frames</button>
+                  )}
                   <button onClick={() => deletePage(pi)} title="Delete sheet">Delete</button>
                 </div>
               </div>
@@ -577,6 +804,7 @@ export default function Editor({ id }) {
                 layout={layout}
                 pageIndex={pi}
                 zoom={zoom}
+                problems={problems}
                 selection={selection}
                 onCellPointerDown={onCellPointerDown}
                 onDropPhoto={onDropPhoto}

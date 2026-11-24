@@ -7,7 +7,7 @@ import { MM_PER_PT } from '@/lib/units';
 
 const Shape = ({ g, ...rest }) => createElement(g.tag, { ...g.attrs, ...rest });
 
-function MagnetCell({ slot, frame, marks, uid, x, y, selected, index, onPointerDown, onDropPhoto, onDoubleClick }) {
+function MagnetCell({ slot, frame, marks, uid, x, y, selected, problem, index, onPointerDown, onDropPhoto, onDoubleClick }) {
   const b = frame.bleed;
   const cw = frame.width + 2 * b;
   const ch = frame.height + 2 * b;
@@ -32,7 +32,7 @@ function MagnetCell({ slot, frame, marks, uid, x, y, selected, index, onPointerD
 
   return (
     <div
-      className={`cell ${selected ? 'is-selected' : ''} ${hasPhoto ? 'has-photo' : 'is-empty'}`}
+      className={`cell ${selected ? 'is-selected' : ''} ${hasPhoto ? 'has-photo' : 'is-empty'} ${problem ? 'is-problem' : ''}`}
       style={{ left: `${x}mm`, top: `${y}mm`, width: `${cw}mm`, height: `${ch}mm` }}
       onPointerDown={(e) => onPointerDown?.(e, index)}
       onDoubleClick={() => onDoubleClick?.(index)}

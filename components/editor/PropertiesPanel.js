@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { UnitInput, NumberInput, Slider, ColorInput, Select, Toggle, Section } from '@/components/ui/Inputs';
 import { imageArea, placeImage, qualityLabel } from '@/lib/layout';
 import { thumbUrl } from '@/lib/image-url';
-import { FONTS } from '@/lib/presets';
+import { FONTS, SHAPES } from '@/lib/presets';
 import { formatSize } from '@/lib/units';
 
 const STATUSES = [
@@ -46,9 +46,35 @@ function CustomSize({ first, place, area, unit, set, lock, setLock }) {
   );
 }
 
+// Free layout: edit the frame(s) themselves
+function FrameEditor({ project, selection, actions, unit }) {
+  const items = selection.map((i) => project.items?.[i]).filter(Boolean);
+  if (!items.length) return null;
+  const f = items[0].frame;
+  const setF = (obj) => actions.patchFrames(selection, obj);
+  return (
+    <Section title={items.length > 1 ? `${items.length} frames` : 'Frame'}>
+      <div className="grid-2">
+        <UnitInput label="Frame width" unit={unit} min={5} valueMM={f.width} onChange={(v) => setF({ width: v })} />
+        <UnitInput label="Frame height" unit={unit} min={5} valueMM={f.height} onChange={(v) => setF({ height: v })} />
+      </div>
+      <button className="btn ghost block" onClick={() => actions.rotateFrames(selection)} title="Swap width and height">
+        ⟳ Turn frame 90° ({f.width >= f.height ? 'make vertical ▯' : 'make horizontal ▭'})
+      </button>
+      <Select label="Shape" value={f.shape} onChange={(v) => setF({ shape: v })} options={SHAPES.map((s) => ({ value: s.id, label: s.name }))} />
+      {f.shape === 'rounded' && <UnitInput label="Corner radius" unit={unit} valueMM={f.radius || 0} onChange={(v) => setF({ radius: v })} />}
+      <UnitInput label="Bleed" unit={unit} valueMM={f.bleed} onChange={(v) => setF({ bleed: v })} />
+      <button className="btn danger block" onClick={() => actions.deleteFrames(selection)}>
+        🗑 Delete frame{items.length > 1 ? 's' : ''}
+      </button>
+    </Section>
+  );
+}
+
 export default function PropertiesPanel({ project, selection, layout, totalPages, filledCount, actions }) {
   const [lockRatio, setLockRatio] = useState(false);
   const unit = project.unit;
+  const isFree = project.layoutMode === 'free';
   const filled = selection.map((i) => project.slots[i]).filter((s) => s && s.url);
   const first = filled[0];
 
@@ -84,12 +110,19 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
               <span>With bleed</span>
               <b>{formatSize(layout.cellW, layout.cellH, unit)}</b>
             </li>
-            <li>
-              <span>Per sheet</span>
-              <b>
-                {layout.perPage} ({layout.cols}×{layout.rows})
-              </b>
-            </li>
+            {isFree ? (
+              <li>
+                <span>Frames (free layout)</span>
+                <b>{(project.items || []).length}</b>
+              </li>
+            ) : (
+              <li>
+                <span>Per sheet</span>
+                <b>
+                  {layout.perPage} ({layout.cols}×{layout.rows})
+                </b>
+              </li>
+            )}
             <li>
               <span>Filled magnets</span>
               <b>{filledCount}</b>
@@ -124,12 +157,14 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
             Deselect
           </button>
         </Section>
+        {isFree && <FrameEditor project={project} selection={selection} actions={actions} unit={unit} />}
       </aside>
     );
   }
 
   const set = (obj) => actions.patchSlots(selection, obj);
-  const area = imageArea(project.frame);
+  const firstIndex = selection.find((i) => project.slots[i] && project.slots[i].url);
+  const area = imageArea(isFree && project.items?.[firstIndex] ? project.items[firstIndex].frame : project.frame);
   const place = placeImage(first, area);
   const q = qualityLabel(place?.dpi);
 
@@ -147,6 +182,8 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
           </div>
         </div>
       </Section>
+
+      {isFree && <FrameEditor project={project} selection={selection} actions={actions} unit={unit} />}
 
       <Section title="Fit & position">
         <div className="seg seg-4">
