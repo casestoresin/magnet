@@ -11,8 +11,9 @@ import { computeLayout, pagesNeeded } from '@/lib/layout';
 import { autoArrange, fillPageItems, frameTemplate, itemsFromGrid, placeNewItem, problemItems, rotatedFrame, snapPosition } from '@/lib/free';
 import { DEFAULT_SLOT, defaultProject } from '@/lib/presets';
 import { UNITS, UNIT_LABELS, MM_PER_PX, PX_PER_MM } from '@/lib/units';
+import { layerId, legacyCaptionToLayer } from '@/lib/text';
 
-const STYLE_KEYS = ['fit', 'brightness', 'contrast', 'saturate', 'grayscale', 'sepia', 'bg', 'text', 'textColor', 'textSize', 'textY', 'textFont', 'textBold', 'textShadow'];
+const STYLE_KEYS = ['fit', 'brightness', 'contrast', 'saturate', 'grayscale', 'sepia', 'bg', 'layers'];
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && k in o).map((k) => [k, o[k]]));
 
 function slotFromPhoto(photo, old) {
@@ -29,15 +30,24 @@ function slotFromPhoto(photo, old) {
 
 function normalize(p) {
   const base = defaultProject();
+  const frame = { ...base.frame, ...(p.frame || {}) };
+  const items = p.items || [];
+  // Old single captions become text layers
+  const slots = (p.slots || []).map((s, i) => {
+    if (!s || !s.text || (s.layers && s.layers.length)) return s;
+    const f = p.layoutMode === 'free' && items[i] ? items[i].frame : frame;
+    const { text, ...rest } = s;
+    return { ...rest, text: '', layers: [legacyCaptionToLayer(s, f)] };
+  });
   return {
     ...base,
     ...p,
     page: { ...base.page, ...(p.page || {}) },
-    frame: { ...base.frame, ...(p.frame || {}) },
+    frame,
     grid: { ...base.grid, ...(p.grid || {}) },
     marks: { ...base.marks, ...(p.marks || {}) },
-    slots: p.slots || [],
-    items: p.items || [],
+    slots,
+    items,
     layoutMode: p.layoutMode || 'grid',
   };
 }
@@ -79,6 +89,10 @@ export default function Editor({ id }) {
   const [toast, setToast] = useState('');
   const [dragTool, setDragTool] = useState('move'); // free layout: 'move' frames or 'pan' photo
   const [activePage, setActivePage] = useState(0);
+  const [activeLayer, setActiveLayer] = useState(null); // { index, id } — text/sticker being edited
+  const [fontTick, setFontTick] = useState(0);
+  const activeLayerRef = useRef(null);
+  activeLayerRef.current = activeLayer;
 
   const lib = usePhotos();
   const projectRef = useRef(null);
@@ -202,6 +216,31 @@ export default function Editor({ id }) {
   const problems = useMemo(() => (project?.layoutMode === 'free' ? problemItems(project) : null), [project]);
   const dragToolRef = useRef(dragTool);
   dragToolRef.current = dragTool;
+
+  // ---------- web fonts: load the ones in use, then re-measure text ----------
+  const fontsKey = useMemo(() => {
+    const set = new Set();
+    project?.slots.forEach((s) => s?.layers?.forEach((l) => l.type === 'text' && set.add(`${l.italic ? 'italic ' : ''}${l.weight || 400}|${l.font}`)));
+    return [...set].sort().join('§');
+  }, [project]);
+  useEffect(() => {
+    if (typeof document === 'undefined' || !document.fonts || !fontsKey) return;
+    let alive = true;
+    Promise.all(
+      fontsKey.split('§').map((k) => {
+        const [w, f] = k.split('|');
+        return document.fonts.load(`${w} 40px ${f}`).catch(() => {});
+      })
+    ).then(() => alive && setFontTick((t) => t + 1));
+    return () => {
+      alive = false;
+    };
+  }, [fontsKey]);
+
+  // Drop the layer selection when its magnet is no longer selected
+  useEffect(() => {
+    if (activeLayer && !selection.includes(activeLayer.index)) setActiveLayer(null);
+  }, [selection, activeLayer]);
   const usage = useMemo(() => {
     const u = {};
     project?.slots.forEach((s) => {
@@ -433,6 +472,79 @@ export default function Editor({ id }) {
           return { ...p, items, slots };
         }),
       deleteFrames: (indices) => removeItems(indices),
+
+      // ----- text & sticker layers -----
+      addLayer: (index, layer) => {
+        update((p) => {
+          const slots = [...p.slots];
+          if (!slots[index] || !slots[index].url) return p;
+          slots[index] = { ...slots[index], layers: [...(slots[index].layers || []), layer] };
+          return { ...p, slots };
+        });
+        setActiveLayer({ index, id: layer.id });
+      },
+      patchLayer: (index, id, obj) =>
+        update(
+          (p) => {
+            const slots = [...p.slots];
+            const s = slots[index];
+            if (!s) return p;
+            slots[index] = { ...s, layers: (s.layers || []).map((l) => (l.id === id ? { ...l, ...obj } : l)) };
+            return { ...p, slots };
+          },
+          { mergeKey: `layer:${index}:${id}:${Object.keys(obj).join(',')}` }
+        ),
+      removeLayer: (index, id) => {
+        update((p) => {
+          const slots = [...p.slots];
+          const s = slots[index];
+          if (!s) return p;
+          slots[index] = { ...s, layers: (s.layers || []).filter((l) => l.id !== id) };
+          return { ...p, slots };
+        });
+        setActiveLayer(null);
+      },
+      moveLayer: (index, id, dir) =>
+        update((p) => {
+          const slots = [...p.slots];
+          const layers = [...(slots[index]?.layers || [])];
+          const i = layers.findIndex((l) => l.id === id);
+          const j = i + dir;
+          if (i < 0 || j < 0 || j >= layers.length) return p;
+          [layers[i], layers[j]] = [layers[j], layers[i]];
+          slots[index] = { ...slots[index], layers };
+          return { ...p, slots };
+        }),
+      duplicateLayer: (index, id) => {
+        const nid = layerId();
+        update((p) => {
+          const slots = [...p.slots];
+          const layers = slots[index]?.layers || [];
+          const src = layers.find((l) => l.id === id);
+          if (!src) return p;
+          slots[index] = { ...slots[index], layers: [...layers, { ...src, id: nid, x: Math.min(0.95, src.x + 0.05), y: Math.min(0.95, src.y + 0.05) }] };
+          return { ...p, slots };
+        });
+        setActiveLayer({ index, id: nid });
+      },
+      // copy one layer onto every other magnet that has a photo (replaces an earlier copy of it)
+      copyLayerToAll: (index, id) => {
+        let n = 0;
+        update((p) => {
+          const src = (p.slots[index]?.layers || []).find((l) => l.id === id);
+          if (!src) return p;
+          const key = src.copyKey || id;
+          const slots = p.slots.map((s, i) => {
+            if (i === index || !s || !s.url) return s;
+            n++;
+            const kept = (s.layers || []).filter((l) => l.copyKey !== key);
+            return { ...s, layers: [...kept, { ...src, id: layerId(), copyKey: key }] };
+          });
+          slots[index] = { ...slots[index], layers: slots[index].layers.map((l) => (l.id === id ? { ...l, copyKey: key } : l)) };
+          return { ...p, slots };
+        });
+        setToast(`Copied to ${n} other magnet(s)`);
+      },
       arrange: (allowRotate) => free.arrange(allowRotate),
       applyStyleToAll: (index) =>
         setSlots((slots) => {
@@ -442,6 +554,8 @@ export default function Editor({ id }) {
     }),
     [patchRoot, patchSlots, clearSlots, setSlots, perPage, update, indicesOnPage, removeItems, free]
   );
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
 
   // ---------- pages ----------
   const addPage = () => update((p) => ({ ...p, pageCount: totalPages + 1 }));
@@ -559,6 +673,53 @@ export default function Editor({ id }) {
     [update]
   );
 
+  // Drag a text / sticker layer around inside its magnet
+  const onLayerPointerDown = useCallback(
+    (e, index, id) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      setSelection([index]);
+      setActiveLayer({ index, id });
+      const p0 = projectRef.current;
+      const frame = p0.layoutMode === 'free' && p0.items[index] ? p0.items[index].frame : p0.frame;
+      const layer = (p0.slots[index]?.layers || []).find((l) => l.id === id);
+      if (!layer) return;
+      const d = { sx: e.clientX, sy: e.clientY, x: layer.x, y: layer.y, moved: false };
+      const move = (ev) => {
+        const pxX = ev.clientX - d.sx;
+        const pxY = ev.clientY - d.sy;
+        if (!d.moved && Math.hypot(pxX, pxY) < 3) return;
+        const k = MM_PER_PX / zoomRef.current;
+        let nx = d.x + (pxX * k) / frame.width;
+        let ny = d.y + (pxY * k) / frame.height;
+        // snap to the centre lines
+        if (Math.abs(nx - 0.5) < 0.02) nx = 0.5;
+        if (Math.abs(ny - 0.5) < 0.02) ny = 0.5;
+        nx = Math.max(-0.2, Math.min(1.2, nx));
+        ny = Math.max(-0.2, Math.min(1.2, ny));
+        update(
+          (p) => {
+            const slots = [...p.slots];
+            const s = slots[index];
+            slots[index] = { ...s, layers: s.layers.map((l) => (l.id === id ? { ...l, x: nx, y: ny } : l)) };
+            return { ...p, slots };
+          },
+          { record: !d.moved }
+        );
+        d.moved = true;
+        document.body.classList.add('panning');
+      };
+      const up = () => {
+        document.body.classList.remove('panning');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+    [update]
+  );
+
   const onDropPhoto = useCallback((index, photo) => {
     placePhoto(index, photo);
     setSelection([index]);
@@ -577,7 +738,12 @@ export default function Editor({ id }) {
     setCalibration(calib);
     setPrintOpen(false);
     setSelection([]);
-    setTimeout(() => {
+    setActiveLayer(null);
+    setTimeout(async () => {
+      // make sure every web font used in text layers is ready before printing
+      try {
+        await document.fonts?.ready;
+      } catch {}
       window.print();
       setCalibration(false);
     }, 300);
@@ -602,6 +768,33 @@ export default function Editor({ id }) {
         return;
       }
       if (typing) return;
+
+      // A text / sticker layer is selected: keys act on it
+      const al = activeLayerRef.current;
+      if (al && !mod) {
+        if (k === 'delete' || k === 'backspace') {
+          e.preventDefault();
+          actionsRef.current.removeLayer(al.index, al.id);
+          return;
+        }
+        if (k === 'escape') {
+          setActiveLayer(null);
+          return;
+        }
+        if (k.startsWith('arrow')) {
+          e.preventDefault();
+          const p = projectRef.current;
+          const fr = p.layoutMode === 'free' && p.items[al.index] ? p.items[al.index].frame : p.frame;
+          const step = e.shiftKey ? 5 : 0.5;
+          const l = (p.slots[al.index]?.layers || []).find((x) => x.id === al.id);
+          if (!l) return;
+          const dx = k === 'arrowleft' ? -step : k === 'arrowright' ? step : 0;
+          const dy = k === 'arrowup' ? -step : k === 'arrowdown' ? step : 0;
+          actionsRef.current.patchLayer(al.index, al.id, { x: l.x + dx / fr.width, y: l.y + dy / fr.height });
+          return;
+        }
+      }
+
       if (mod && k === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -805,6 +998,9 @@ export default function Editor({ id }) {
                 pageIndex={pi}
                 zoom={zoom}
                 problems={problems}
+                activeLayer={activeLayer}
+                fontTick={fontTick}
+                onLayerPointerDown={onLayerPointerDown}
                 selection={selection}
                 onCellPointerDown={onCellPointerDown}
                 onDropPhoto={onDropPhoto}
@@ -820,7 +1016,17 @@ export default function Editor({ id }) {
           <CalibrationPage page={project.page} />
         </main>
 
-        <PropertiesPanel project={project} selection={selection} layout={layout} totalPages={totalPages} filledCount={filledCount} actions={actions} />
+        <PropertiesPanel
+          project={project}
+          selection={selection}
+          layout={layout}
+          totalPages={totalPages}
+          filledCount={filledCount}
+          actions={actions}
+          activeLayer={activeLayer}
+          setActiveLayer={setActiveLayer}
+          photos={lib.photos}
+        />
       </div>
 
       {printOpen && (

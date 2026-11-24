@@ -3,11 +3,13 @@
 import { createElement, memo } from 'react';
 import { imageArea, placeImage, shapeGeometry } from '@/lib/layout';
 import { printUrl } from '@/lib/image-url';
-import { MM_PER_PT } from '@/lib/units';
+import { LayersView } from './Layers';
 
 const Shape = ({ g, ...rest }) => createElement(g.tag, { ...g.attrs, ...rest });
 
-function MagnetCell({ slot, frame, marks, uid, x, y, selected, problem, index, onPointerDown, onDropPhoto, onDoubleClick }) {
+// fontTick is only here so cells re-measure text once web fonts finish loading
+// eslint-disable-next-line no-unused-vars
+function MagnetCell({ slot, frame, marks, uid, x, y, selected, problem, index, activeLayerId, fontTick, onPointerDown, onLayerPointerDown, onDropPhoto, onDoubleClick }) {
   const b = frame.bleed;
   const cw = frame.width + 2 * b;
   const ch = frame.height + 2 * b;
@@ -27,8 +29,6 @@ function MagnetCell({ slot, frame, marks, uid, x, y, selected, problem, index, o
   const filter = hasPhoto
     ? `brightness(${slot.brightness ?? 100}%) contrast(${slot.contrast ?? 100}%) saturate(${slot.saturate ?? 100}%) grayscale(${slot.grayscale ?? 0}%) sepia(${slot.sepia ?? 0}%)`
     : undefined;
-
-  const fontSize = (slot?.textSize || 12) * MM_PER_PT;
 
   return (
     <div
@@ -76,24 +76,14 @@ function MagnetCell({ slot, frame, marks, uid, x, y, selected, problem, index, o
                 style={{ filter }}
               />
             </g>
-            {slot.text && (
-              <text
-                x={b + frame.width / 2}
-                y={b + frame.height - (slot.textY ?? 5)}
-                textAnchor="middle"
-                dominantBaseline="alphabetic"
-                fontSize={fontSize}
-                fontFamily={slot.textFont}
-                fontWeight={slot.textBold ? 700 : 400}
-                fill={slot.textColor || '#fff'}
-                stroke={slot.textShadow ? 'rgba(0,0,0,0.55)' : 'none'}
-                strokeWidth={slot.textShadow ? fontSize * 0.12 : 0}
-                paintOrder="stroke"
-                strokeLinejoin="round"
-              >
-                {slot.text}
-              </text>
-            )}
+            <LayersView
+              layers={slot.layers}
+              frame={frame}
+              uid={uid}
+              index={index}
+              activeLayerId={activeLayerId}
+              onLayerPointerDown={onLayerPointerDown}
+            />
           </g>
         )}
 

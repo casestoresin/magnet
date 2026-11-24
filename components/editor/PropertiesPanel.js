@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { UnitInput, NumberInput, Slider, ColorInput, Select, Toggle, Section } from '@/components/ui/Inputs';
 import { imageArea, placeImage, qualityLabel } from '@/lib/layout';
 import { thumbUrl } from '@/lib/image-url';
-import { FONTS, SHAPES } from '@/lib/presets';
+import { SHAPES } from '@/lib/presets';
+import TextPanel from './TextPanel';
 import { formatSize } from '@/lib/units';
 
 const STATUSES = [
@@ -71,7 +72,7 @@ function FrameEditor({ project, selection, actions, unit }) {
   );
 }
 
-export default function PropertiesPanel({ project, selection, layout, totalPages, filledCount, actions }) {
+export default function PropertiesPanel({ project, selection, layout, totalPages, filledCount, actions, activeLayer, setActiveLayer, photos }) {
   const [lockRatio, setLockRatio] = useState(false);
   const unit = project.unit;
   const isFree = project.layoutMode === 'free';
@@ -183,6 +184,17 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
         </div>
       </Section>
 
+      <TextPanel
+        slot={first}
+        index={firstIndex}
+        frame={isFree && project.items?.[firstIndex] ? project.items[firstIndex].frame : project.frame}
+        unit={unit}
+        actions={actions}
+        activeLayer={activeLayer}
+        setActiveLayer={setActiveLayer}
+        photos={photos || []}
+      />
+
       {isFree && <FrameEditor project={project} selection={selection} actions={actions} unit={unit} />}
 
       <Section title="Fit & position">
@@ -261,22 +273,6 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
         <Slider label="Black & white" min={0} max={100} value={first.grayscale ?? 0} onChange={(v) => set({ grayscale: v })} format={(v) => `${v}%`} />
         <Slider label="Sepia / vintage" min={0} max={100} value={first.sepia ?? 0} onChange={(v) => set({ sepia: v })} format={(v) => `${v}%`} />
         <ColorInput label="Background (empty area)" value={first.bg || '#ffffff'} onChange={(v) => set({ bg: v })} />
-      </Section>
-
-      <Section title="Text / caption">
-        <input className="input" placeholder="e.g. Goa 2026 ❤" value={first.text || ''} onChange={(e) => set({ text: e.target.value })} />
-        {first.text && (
-          <>
-            <div className="grid-2">
-              <NumberInput label="Size" suffix="pt" min={4} max={120} value={first.textSize ?? 12} onChange={(v) => set({ textSize: v })} />
-              <UnitInput label="From bottom" unit={unit} min={null} valueMM={first.textY ?? 5} onChange={(v) => set({ textY: v })} />
-            </div>
-            <Select label="Font" value={first.textFont || FONTS[0]} onChange={(v) => set({ textFont: v })} options={FONTS.map((f) => ({ value: f, label: f.split(',')[0].replace(/"/g, '') }))} />
-            <ColorInput label="Colour" value={first.textColor || '#ffffff'} onChange={(v) => set({ textColor: v })} />
-            <Toggle label="Bold" checked={first.textBold} onChange={(v) => set({ textBold: v })} />
-            <Toggle label="Outline / shadow" checked={first.textShadow} onChange={(v) => set({ textShadow: v })} />
-          </>
-        )}
       </Section>
 
       <Section title="Actions">

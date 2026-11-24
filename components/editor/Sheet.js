@@ -74,7 +74,25 @@ function CornerMarks({ page, items, marks }) {
   );
 }
 
-export default function Sheet({ project, layout, pageIndex, zoom, selection, problems, onCellPointerDown, onDropPhoto, onCellDoubleClick }) {
+export default function Sheet({
+  project,
+  layout,
+  pageIndex,
+  zoom,
+  selection,
+  problems,
+  activeLayer,
+  fontTick,
+  onCellPointerDown,
+  onLayerPointerDown,
+  onDropPhoto,
+  onCellDoubleClick,
+}) {
+  const layerProps = (i) => ({
+    activeLayerId: activeLayer && activeLayer.index === i ? activeLayer.id : null,
+    fontTick,
+    onLayerPointerDown,
+  });
   const { page, frame, marks } = project;
   const base = pageIndex * layout.perPage;
   const free = project.layoutMode === 'free';
@@ -102,6 +120,7 @@ export default function Sheet({ project, layout, pageIndex, zoom, selection, pro
             marks={marks}
             selected={selection.includes(i)}
             problem={problems?.has(i)}
+            {...layerProps(i)}
             onPointerDown={onCellPointerDown}
             onDropPhoto={onDropPhoto}
             onDoubleClick={onCellDoubleClick}
@@ -141,6 +160,7 @@ export default function Sheet({ project, layout, pageIndex, zoom, selection, pro
             frame={frame}
             marks={marks}
             selected={selection.includes(g)}
+            {...layerProps(g)}
             onPointerDown={onCellPointerDown}
             onDropPhoto={onDropPhoto}
             onDoubleClick={onCellDoubleClick}
