@@ -39,9 +39,9 @@ export default function OrderDetails({ value, onChange, compact = false }) {
   const inputRef = useRef(null);
   const label = value.label;
 
-  const applyText = (text) => {
+  const applyText = (text, fileName = label?.name || '') => {
     setRawText(text);
-    const f = toFields(parseLabel(text));
+    const f = toFields(parseLabel(text, fileName));
     const found = Object.fromEntries(Object.entries(f).filter(([, v]) => v));
     setFilled(Object.keys(found));
     onChange(found);
@@ -64,11 +64,12 @@ export default function OrderDetails({ value, onChange, compact = false }) {
         }),
       ]);
       onChange({ label: uploaded });
-      const n = read.text ? applyText(read.text) : 0;
+      const n = read.text ? applyText(read.text, file.name) : 0;
+      const pagesNote = read.pages > 1 ? ` This PDF has ${read.pages} pages — only page 1 was read.` : '';
       setStatus(
         n
-          ? `✓ Filled ${n} field(s) from the label (${read.method === 'pdf-text' ? 'PDF text' : 'OCR'}). Please check them.`
-          : 'Label saved, but no details could be read — type them below.'
+          ? `✓ Filled ${n} field(s) from the label (${read.method === 'pdf-text' ? 'PDF text' : 'OCR'}). Please check them.${pagesNote}`
+          : `Label saved, but no details could be read — type them below.${pagesNote}`
       );
     } catch (e) {
       setStatus(`⚠ ${e.message}`);
