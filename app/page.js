@@ -23,7 +23,7 @@ export default function Dashboard() {
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
   const [order, setOrder] = useState({ ...EMPTY_ORDER, label: null });
-  const [form, setForm] = useState({ unit: 'mm', pagePreset: 'a4', pageW: 210, pageH: 297, framePreset: '2.5x2.5', frameW: 63.5, frameH: 63.5 });
+  const [form, setForm] = useState({ unit: 'mm', pagePreset: 'a4', pageW: 210, pageH: 297, framePreset: '2.5x3.5', frameW: 63.5, frameH: 88.9 });
   const [quickOrder, setQuickOrder] = useState('');
 
   const load = () =>
@@ -116,7 +116,10 @@ export default function Dashboard() {
           <form onSubmit={create} className="new-order">
             <div className="new-order-left">
               <h4>1 · Customer & order</h4>
-              <p className="hint">Upload the shipping label to fill this in automatically — or just type the order number.</p>
+              <p className="hint">
+                Upload the shipping label to fill this in automatically — or just type the order number, or only the customer&apos;s name.
+                Nothing here is required.
+              </p>
               <OrderDetails value={order} onChange={(patch) => setOrder((o) => ({ ...o, ...patch }))} />
             </div>
             <div className="new-order-right">
