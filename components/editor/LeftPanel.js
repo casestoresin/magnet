@@ -15,7 +15,7 @@ const TABS = [
   { id: 'marks', icon: '✂', label: 'Marks' },
 ];
 
-export default function LeftPanel({ project, patch, update, layout, lib, usage, onPhotoClick, onAutoFill, hasSelection, free, activePage }) {
+export default function LeftPanel({ project, patch, update, layout, lib, usage, onPhotoClick, onAutoFill, hasSelection, free, activePage, projectId, orderNumber }) {
   const [tab, setTab] = useState('photos');
   const unit = project.unit;
 
@@ -31,7 +31,15 @@ export default function LeftPanel({ project, patch, update, layout, lib, usage, 
       </nav>
       <div className="panel-body">
         {tab === 'photos' && (
-          <PhotosTab lib={lib} usage={usage} onPhotoClick={onPhotoClick} onAutoFill={onAutoFill} hasSelection={hasSelection} />
+          <PhotosTab
+            lib={lib}
+            usage={usage}
+            onPhotoClick={onPhotoClick}
+            onAutoFill={onAutoFill}
+            hasSelection={hasSelection}
+            projectId={projectId}
+            orderNumber={orderNumber}
+          />
         )}
         {tab === 'sheet' && <SheetTab project={project} patch={patch} unit={unit} />}
         {tab === 'frame' && <FrameTab project={project} patch={patch} unit={unit} free={free} />}
@@ -60,7 +68,7 @@ export default function LeftPanel({ project, patch, update, layout, lib, usage, 
   );
 }
 
-function PhotosTab({ lib, usage, onPhotoClick, onAutoFill, hasSelection }) {
+function PhotosTab({ lib, usage, onPhotoClick, onAutoFill, hasSelection, projectId, orderNumber }) {
   const [picked, setPicked] = useState([]);
   const [copies, setCopies] = useState(1);
   const [overwrite, setOverwrite] = useState(false);
@@ -100,7 +108,17 @@ function PhotosTab({ lib, usage, onPhotoClick, onAutoFill, hasSelection }) {
       <button className="btn ghost block" onClick={() => setPicked(lib.photos.map((p) => p._id))}>
         Tick all photos
       </button>
-      <PhotoLibrary lib={lib} compact draggable selected={picked} onToggleSelect={toggle} onPhotoClick={onPhotoClick} usage={usage} />
+      <PhotoLibrary
+        lib={lib}
+        compact
+        draggable
+        selected={picked}
+        onToggleSelect={toggle}
+        onPhotoClick={onPhotoClick}
+        usage={usage}
+        project={projectId}
+        orderNumber={orderNumber}
+      />
     </>
   );
 }

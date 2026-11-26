@@ -1,22 +1,38 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Project from '@/models/Project';
+import Photo from '@/models/Photo';
 import { defaultProject } from '@/lib/presets';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// GET /api/projects — list (lightweight)
-export async function GET() {
+// GET /api/projects — list (lightweight).  ?order=XYZ → exact order-number lookup
+export async function GET(req) {
   try {
     await connectDB();
+    const order = new URL(req.url).searchParams.get('order');
+    if (order) {
+      const found = await Project.find({ orderNumber: order.trim() }).select('_id name orderNumber customer updatedAt').lean();
+      return NextResponse.json({ projects: found });
+    }
     const projects = await Project.find({}).sort({ updatedAt: -1 }).lean();
+    const counts = await Photo.aggregate([{ $match: { project: { $ne: null } } }, { $group: { _id: '$project', n: { $sum: 1 } } }]);
+    const photoCount = Object.fromEntries(counts.map((c) => [String(c._id), c.n]));
     const list = projects.map((p) => {
       const filled = (p.slots || []).filter((s) => s && s.photoId);
       return {
         _id: p._id,
         name: p.name,
+        orderNumber: p.orderNumber || '',
         customer: p.customer,
+        phone: p.phone || '',
+        city: p.city || '',
+        pincode: p.pincode || '',
+        awb: p.awb || '',
+        platform: p.platform || '',
+        hasLabel: !!p.label?.url,
+        photoCount: photoCount[String(p._id)] || 0,
         status: p.status,
         unit: p.unit,
         page: p.page,

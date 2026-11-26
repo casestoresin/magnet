@@ -14,6 +14,7 @@ export async function PATCH(req, { params }) {
     const update = {};
     if (typeof body.name === 'string') update.name = body.name;
     if (typeof body.tag === 'string') update.tag = body.tag.trim();
+    if (body.project === null || (typeof body.project === 'string' && /^[a-f0-9]{24}$/i.test(body.project))) update.project = body.project;
     const photo = await Photo.findByIdAndUpdate(id, update, { new: true }).lean();
     if (!photo) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ photo });

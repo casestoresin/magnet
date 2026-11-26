@@ -6,6 +6,7 @@ import { imageArea, placeImage, qualityLabel } from '@/lib/layout';
 import { thumbUrl } from '@/lib/image-url';
 import { SHAPES } from '@/lib/presets';
 import TextPanel from './TextPanel';
+import OrderDetails from '@/components/OrderDetails';
 import { formatSize } from '@/lib/units';
 
 const STATUSES = [
@@ -82,15 +83,8 @@ export default function PropertiesPanel({ project, selection, layout, totalPages
   if (!selection.length) {
     return (
       <aside className="right-panel no-print">
-        <Section title="Order details">
-          <label className="field">
-            <span className="field-label">Customer name</span>
-            <input className="input" value={project.customer || ''} onChange={(e) => actions.patchRoot({ customer: e.target.value })} />
-          </label>
-          <label className="field">
-            <span className="field-label">Phone</span>
-            <input className="input" value={project.phone || ''} onChange={(e) => actions.patchRoot({ phone: e.target.value })} />
-          </label>
+        <Section title="Order & customer">
+          <OrderDetails value={project} onChange={(patch) => actions.patchRoot(patch)} compact />
           <Select label="Status" value={project.status || 'draft'} onChange={(v) => actions.patchRoot({ status: v })} options={STATUSES} />
           <label className="field">
             <span className="field-label">Notes</span>

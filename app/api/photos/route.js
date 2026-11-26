@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import { connectDB } from '@/lib/mongodb';
 import { uploadBuffer } from '@/lib/cloudinary';
 import Photo from '@/models/Photo';
@@ -6,16 +7,22 @@ import Photo from '@/models/Photo';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// GET /api/photos?q=search&tag=customer
+const isId = (v) => typeof v === 'string' && mongoose.Types.ObjectId.isValid(v);
+
+// GET /api/photos?q=search&tag=customer&project=<orderId>|none&stickers=1
 export async function GET(req) {
   try {
     await connectDB();
     const { searchParams } = new URL(req.url);
     const q = searchParams.get('q');
     const tag = searchParams.get('tag');
+    const project = searchParams.get('project');
     const filter = {};
     if (q) filter.$or = [{ name: { $regex: q, $options: 'i' } }, { tag: { $regex: q, $options: 'i' } }];
     if (tag) filter.tag = tag;
+    if (project === 'none') filter.project = null;
+    else if (isId(project)) filter.project = project;
+    if (searchParams.get('stickers') === '1') filter.$or = [{ tag: { $regex: 'sticker', $options: 'i' } }, { format: 'png' }];
     const photos = await Photo.find(filter).sort({ createdAt: -1 }).limit(1000).lean();
     const tags = await Photo.distinct('tag', { tag: { $ne: '' } });
     return NextResponse.json({ photos, tags });
@@ -34,6 +41,7 @@ export async function POST(req) {
     if ((req.headers.get('content-type') || '').includes('application/json')) {
       const body = await req.json();
       const tag = (body.tag || '').toString().trim();
+      const project = isId(body.project) ? body.project : null;
       const prefix = `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`;
       const items = (body.photos || []).filter((p) => p && typeof p.url === 'string' && p.url.startsWith(prefix) && p.publicId);
       if (!items.length) return NextResponse.json({ error: 'No valid photos' }, { status: 400 });
@@ -47,6 +55,7 @@ export async function POST(req) {
           bytes: Number(p.bytes) || 0,
           format: String(p.format || ''),
           tag,
+          project,
         }))
       );
       return NextResponse.json({ photos, errors: [] }, { status: 201 });

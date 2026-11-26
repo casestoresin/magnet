@@ -4,16 +4,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, uploadPhotos } from '@/lib/api';
 import { thumbUrl } from '@/lib/image-url';
 
-export function usePhotos() {
+// params: {} = all photos, { project: id } = one order's photos
+export function usePhotos(initialParams = {}) {
   const [photos, setPhotos] = useState([]);
   const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [params, setParams] = useState(initialParams);
+  const key = JSON.stringify(params);
 
   const refresh = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.listPhotos();
+      const data = await api.listPhotos(JSON.parse(key));
       setPhotos(data.photos);
       setTags(data.tags || []);
       setError('');
@@ -22,13 +25,13 @@ export function usePhotos() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [key]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  return { photos, setPhotos, tags, loading, error, refresh };
+  return { photos, setPhotos, tags, loading, error, refresh, params, setParams };
 }
 
 // Upload drop zone + photo grid. Used on /photos and inside the editor.
@@ -40,11 +43,15 @@ export default function PhotoLibrary({
   onPhotoClick,
   usage = {},
   draggable = false,
+  project = null, // order id: uploads are linked to this order
+  orderNumber = '',
+  orders = null, // [{ _id, label }] to filter by order on the library page
 }) {
   const { photos, setPhotos, tags, loading, error, refresh } = lib;
   const [progress, setProgress] = useState(null);
   const [uploadErrors, setUploadErrors] = useState([]);
-  const [tag, setTag] = useState('');
+  const [tag, setTag] = useState(orderNumber || '');
+  const onlyThisOrder = project && lib.params?.project === project;
   const [filterTag, setFilterTag] = useState('');
   const [q, setQ] = useState('');
   const [over, setOver] = useState(false);
@@ -54,7 +61,7 @@ export default function PhotoLibrary({
     if (!files || !files.length) return;
     setProgress(0);
     setUploadErrors([]);
-    const { photos: added, errors } = await uploadPhotos(files, { tag, onProgress: setProgress });
+    const { photos: added, errors } = await uploadPhotos(files, { tag, project, onProgress: setProgress });
     setPhotos((p) => [...added, ...p]);
     setUploadErrors(errors);
     setProgress(null);
@@ -102,9 +109,35 @@ export default function PhotoLibrary({
           </>
         )}
       </div>
-      <div className="library-tools">
-        <input className="input" placeholder="Tag for new uploads (customer / order)" value={tag} onChange={(e) => setTag(e.target.value)} />
-      </div>
+      {project ? (
+        <div className="order-scope">
+          <span>{onlyThisOrder ? `📦 Showing photos of this order only${orderNumber ? ` (#${orderNumber})` : ''}` : '🗂 Showing ALL photos'}</span>
+          <button className="link" onClick={() => lib.setParams(onlyThisOrder ? {} : { project })}>
+            {onlyThisOrder ? 'Show all' : 'Only this order'}
+          </button>
+        </div>
+      ) : (
+        <div className="library-tools">
+          <input className="input" placeholder="Tag for new uploads (customer / order)" value={tag} onChange={(e) => setTag(e.target.value)} />
+        </div>
+      )}
+      {orders && (
+        <div className="library-tools">
+          <select
+            className="input"
+            value={lib.params?.project || ''}
+            onChange={(e) => lib.setParams(e.target.value ? { project: e.target.value } : {})}
+          >
+            <option value="">All orders</option>
+            <option value="none">Not linked to any order</option>
+            {orders.map((o) => (
+              <option key={o._id} value={o._id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {uploadErrors.length > 0 && <div className="alert error">{uploadErrors.join(' · ')}</div>}
       {error && <div className="alert error">{error}</div>}
 

@@ -94,7 +94,18 @@ export default function Editor({ id }) {
   const activeLayerRef = useRef(null);
   activeLayerRef.current = activeLayer;
 
-  const lib = usePhotos();
+  const lib = usePhotos({ project: id }); // only this order's photos
+  const [stickers, setStickers] = useState([]); // PNG / "sticker" images from the whole library
+  useEffect(() => {
+    api
+      .listPhotos({ stickers: 1 })
+      .then((d) => setStickers(d.photos || []))
+      .catch(() => {});
+  }, []);
+  const stickerPool = useMemo(() => {
+    const seen = new Set();
+    return [...lib.photos, ...stickers].filter((p) => (seen.has(p._id) ? false : seen.add(p._id)));
+  }, [lib.photos, stickers]);
   const projectRef = useRef(null);
   const zoomRef = useRef(zoom);
   const past = useRef([]);
@@ -879,6 +890,7 @@ export default function Editor({ id }) {
         <Link href="/" className="brand-sm" title="Back to dashboard">
           ← 🧲
         </Link>
+        {project.orderNumber && <span className="order-chip" title="Order number">#{project.orderNumber}</span>}
         <input className="title-input" value={project.name} onChange={(e) => patchRoot({ name: e.target.value })} />
         <span className={`save-state ${saveState}`}>
           {saveState === 'saved' ? '✓ Saved' : saveState === 'saving' ? 'Saving…' : saveState === 'error' ? '⚠ Not saved' : '● Unsaved'}
@@ -954,6 +966,8 @@ export default function Editor({ id }) {
           hasSelection={selection.length > 0}
           free={free}
           activePage={activePage}
+          projectId={id}
+          orderNumber={project.orderNumber}
         />
 
         <main className="canvas-wrap" ref={wrapRef} onPointerDown={(e) => e.target === e.currentTarget && setSelection([])}>
@@ -1025,7 +1039,7 @@ export default function Editor({ id }) {
           actions={actions}
           activeLayer={activeLayer}
           setActiveLayer={setActiveLayer}
-          photos={lib.photos}
+          photos={stickerPool}
         />
       </div>
 

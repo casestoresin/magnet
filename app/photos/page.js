@@ -1,10 +1,28 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import TopNav from '@/components/TopNav';
 import PhotoLibrary, { usePhotos } from '@/components/PhotoLibrary';
+import { api } from '@/lib/api';
 
 export default function PhotosPage() {
   const lib = usePhotos();
+  const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    api
+      .listProjects()
+      .then((d) =>
+        setOrders(
+          d.projects.map((p) => ({
+            _id: p._id,
+            label: `${p.orderNumber ? `#${p.orderNumber}` : p.name}${p.customer ? ` — ${p.customer}` : ''} (${p.photoCount})`,
+          }))
+        )
+      )
+      .catch(() => {});
+  }, []);
+
   return (
     <>
       <TopNav />
@@ -14,10 +32,10 @@ export default function PhotosPage() {
           <span className="muted">{lib.photos.length} photos · stored on Cloudinary</span>
         </div>
         <p className="hint">
-          Upload customer photos here (or straight from the editor). Use a <b>tag</b> such as the customer name to find them
-          quickly. Photos marked <b>!</b> are low resolution and may print blurry.
+          Photos uploaded inside an order belong to that order and only show up there. Upload <b>stickers</b> (transparent PNGs, tag
+          “sticker”) here so they can be used on every order. Photos marked <b>!</b> are low resolution.
         </p>
-        <PhotoLibrary lib={lib} />
+        <PhotoLibrary lib={lib} orders={orders} />
       </div>
     </>
   );

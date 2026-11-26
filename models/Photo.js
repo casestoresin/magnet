@@ -10,6 +10,7 @@ const PhotoSchema = new mongoose.Schema(
     bytes: Number,
     format: String,
     tag: { type: String, default: '' }, // e.g. customer / order name
+    project: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', default: null, index: true }, // order it belongs to
   },
   { timestamps: true }
 );
